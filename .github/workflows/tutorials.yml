@@ -1,14 +1,6 @@
 name: Jupyter Notebooks
 
-on:
-  # Trigger the workflow on push or pull request,
-  # but only for the master branch
-  push:
-    branches:
-      - master
-  pull_request:
-    branches:
-      - master
+on: push
 
 jobs:
   tutorials:
@@ -21,24 +13,18 @@ jobs:
       DEVITO_BACKEND: "core"
       PYTHON_VERSION: "3.7"
       RUN_CMD: ""
+      DEVITO_LOGGING: "DEBUG"
 
     strategy:
       # Prevent all build to stop if a single one fails
       fail-fast: false
       matrix:
         name: [
-          tutos-ubuntu-gcc-py37,
           tutos-osx-gcc-py37,
-          tutos-osx-clang-py37,
-          tutos-docker-gcc-py36
+          tutos-osx-clang-py37
           ]
 
         include:
-          - name: tutos-ubuntu-gcc-py37
-            os: ubuntu-16.04
-            compiler: gcc-7
-            language: "openmp"
-
           - name: tutos-osx-gcc-py37
             os: macos-latest
             compiler: gcc-9
@@ -48,11 +34,6 @@ jobs:
             os: macos-latest
             compiler: clang
             language: "C"
-
-          - name: tutos-docker-gcc-py36
-            os: ubuntu-latest
-            compiler: gcc
-            language: "openmp"
 
     steps:
     - name: Checkout devito
