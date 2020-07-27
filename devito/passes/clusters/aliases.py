@@ -1,5 +1,6 @@
-from collections import OrderedDict, defaultdict
+from collections import OrderedDict, defaultdict, namedtuple
 from functools import partial
+from itertools import groupby
 
 from cached_property import cached_property
 import numpy as np
@@ -11,7 +12,8 @@ from devito.passes.clusters.utils import cluster_pass, make_is_time_invariant
 from devito.symbolics import (compare_ops, estimate_cost, q_constant, q_terminalop,
                               retrieve_indexed, search, uxreplace)
 from devito.tools import flatten, split
-from devito.types import Array, Eq, ShiftedDimension, Scalar
+from devito.types import (Array, Eq, ModuloDimension, DefaultDimension,
+                          ShiftedDimension, Scalar)
 
 __all__ = ['cire']
 
@@ -106,6 +108,9 @@ def cire(cluster, mode, sregistry, options, platform):
 
         # Create a Schedule for the chosen aliases
         schedule = make_schedule(cluster, aliases)
+
+        # Optimize the Schedule by attempting a reduction of the working set
+        schedule = unwind(schedule)
 
         # Turn the Schedule into a sequence of Clusters
         clusters, subs = process(cluster, chosen, schedule, sregistry, platform)
@@ -468,12 +473,44 @@ def make_schedule(cluster, aliases):
             # E.g., an `alias` having 0-distance along all Dimensions
             writeto = IntervalGroup(intervals, relations=cluster.ispace.relations)
 
-        items.append((alias, writeto, aliaseds, distances))
+        items.append(ScheduledAlias(alias, writeto, aliaseds, distances))
 
     # As by contract (see docstring), smaller write-to regions go in first
-    processed = sorted(items, key=lambda i: len(i[1]))
+    processed = sorted(items, key=lambda i: len(i.writeto))
 
     return Schedule(aliases.index_mapper, *processed)
+
+
+def unwind(schedule):
+    """
+    Optimize a Schedule by turning the outermost IncrDimension (if any)
+    into a ModuloDimension. This shrinks the aliases working set by
+    reducing the size of the tensor temporaries.
+    """
+    index_mapper = {}
+    processed = []
+    for writeto, g in groupby(schedule, key=lambda i: i.writeto):
+        if len(writeto) < 2:
+            continue
+
+        candidate = writeto[0]
+        d = candidate.dim
+        if not d.is_Incr:
+            continue
+
+        assert d in schedule.index_mapper
+        ds = schedule.index_mapper[d]
+
+        group = list(g)
+
+        nslots = abs(candidate.lower) + abs(candidate.upper) + 1
+
+        dd = DefaultDimension(name=d.root.name, default_value=nslots)
+
+        md = ModuloDimension(d, 0, nslots, ds.name)
+        from IPython import embed; embed()
+
+    return schedule
 
 
 def process(cluster, chosen, schedule, sregistry, platform):
@@ -827,6 +864,9 @@ class AliasMapper(OrderedDict):
             if key in aliaseds:
                 return aliaseds
         return []
+
+
+ScheduledAlias = namedtuple('ScheduledAlias', 'alias writeto aliaseds distances')
 
 
 class Schedule(tuple):
